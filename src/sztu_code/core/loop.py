@@ -53,11 +53,18 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# _unwrap_provider 的最大解包层数：真实 wrapper 嵌套远小于此值；上限防御
+# 动态属性对象（每次 getattr 都返回新对象，seen 集合永远追不上）导致死循环
+_MAX_PROVIDER_UNWRAP_DEPTH = 32
+
+
 # 解开 Trace 等 provider wrapper，拿到底层模型提供者
 def _unwrap_provider(provider: LLMProvider) -> object:
     current: object = provider
     seen: set[int] = set()
-    while hasattr(current, "_inner") and id(current) not in seen:
+    for _ in range(_MAX_PROVIDER_UNWRAP_DEPTH):
+        if not hasattr(current, "_inner") or id(current) in seen:
+            break
         seen.add(id(current))
         current = getattr(current, "_inner")
     return current
