@@ -254,10 +254,6 @@ class AgentLoop:
         canvas: TaskCanvas = context.canvas
 
         while not context.is_done():
-            # Ensure a prepared summary replaces the oversized snapshot before
-            # the next model request instead of only at runner shutdown.
-            if self._compactor is not None:
-                await self._compactor.wait_pending()
             self._drain_steering(context)
             # 惰性记录 run 开始墙钟（runner/子 agent 都可能未设置）
             if context.started_at <= 0.0:
@@ -665,12 +661,15 @@ class AgentLoop:
                     ):
                         should_compact = False
                     else:
-                        # 滑动窗口异步压缩 — 不阻塞 Agent 继续处理下一步
-                        self._compactor.compact_async(
+                        # 滑动窗口异步压缩 — 不阻塞 Agent 继续处理下一步；
+                        # single-flight 跳过（返回 None）时不更新冷却步，
+                        # 在飞任务完成后若仍超阈值可立即重新触发
+                        task = self._compactor.compact_async(
                             context, self._provider,
                             sliding_window_size=self._sliding_window_size,
                         )
-                        self._last_compact_step = context.step
+                        if task is not None:
+                            self._last_compact_step = context.step
 
             await self._bus.publish(
                 StepFinishedEvent(run_id=context.run_id, step=context.step, ts=_now())
